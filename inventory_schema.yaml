@@ -1,0 +1,34 @@
+# This basically means `mgr/cephadm/inventory`. All keys below `inventory` don't have their own addressable namespace
+# as the mon_store just stores it as a blob of data
+inventory:
+  version: 2
+  # the version of the inventory store structure
+  unique_hostname:
+    # hostnames need to be unique in a cluster, we can use it as the key with values
+    # being the attributes
+    devices:
+      # One node can have multiple Devices
+      - key1: val
+        key2: val
+      - key1: val
+        key2: val
+    networks:
+      # one node can have multiple Networks
+      - key1: val
+        key2: val
+      - key1: val
+        key2: val
+    daemons:
+      # one node can have multiple Daemons running
+      - key1: val
+        key2: val
+    config: # config is a bad name, though
+      # host-level k-v pairs i.e. `last_host_check` could be a candidate
+      key1: val
+      key2: val
+    attributes:
+      # here we store arbitrary information about the host like
+      # fqdn, kernel version, os-name, labels etc
+      # this opens up the possibility for node inspection (cpu/ram consumption etc)
+      key1: val
+      key2: val

@@ -1,0 +1,15 @@
+specs:
+  - spec:
+      # service_name, service_type
+      key1: val
+      key3: val
+    # random k-v pairs on a spec level (created_at) would be a candidate
+    key1: val
+    # versioning
+    version: 1
+
+# The current implementation saves the spec with `type.name` in the mon_store.
+# This has the advantage that you can retrieve specific specs without iterating
+# through all specs in order to find the requested spec of `type` foo.
+# Computationally speaking this shouldn't really matter as there are never more
+# than 10~ specs stored. Also, we pre-load all specs on ceph-mgr startup.
