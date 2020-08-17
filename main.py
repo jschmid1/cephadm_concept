@@ -24,12 +24,12 @@ class Internal:
         while True:
             print("foo")
             counter += 1
-            self.inventory.hosts[0].attributes.key1 = counter
-            self.inventory.hosts[0].config.key1 = counter
+            print(type(self.inventory.hosts[0].attributes))
+            print(type(self.inventory.hosts[0].networks))
             self.inventory.hosts[0].devices[0].key1 = counter
+            self.inventory.hosts[0].networks[0].key1 = counter
+            self.inventory.hosts[0].attributes.key1 = counter
             self.inventory.hosts[0].refresh_component()
-            self.inventory.hosts[0].needs_refresh = True
-            self.inventory.hosts[0].devices[0].needs_refresh = True
 
             time.sleep(3)
             pass

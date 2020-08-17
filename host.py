@@ -1,6 +1,12 @@
 from typing import *
 from store import Store
-from components import Network, Networks, Device, Devices, Attribute, DaemonDescription, DaemonDescriptions, Config
+from components import Networks, Devices, Attribute, DaemonDescriptions, Config
+
+STORABLE_COMPONENTS_MAP = {'networks': Networks,
+                           'attributes': Attribute,
+                           'config': Config,
+                           'devices': Devices,
+                           'daemons': DaemonDescriptions}
 
 
 class Host:
@@ -9,13 +15,7 @@ class Host:
     This makes it easy to retrieve information about the host and its inventory.
     """
 
-    storable_components_map = {'networks': Networks,
-                               'attributes': Attribute,
-                               'config': Config,
-                               'devices': Devices,
-                               'daemons': DaemonDescriptions}
-
-    storable_components = list(storable_components_map.keys())
+    storable_components = list(STORABLE_COMPONENTS_MAP.keys())
 
     def __init__(self, hostname, mgr=None):
         self.mgr = mgr
@@ -36,6 +36,12 @@ class Host:
 
     def online_daemons(self):
         return [x for x in self.daemons if x.running is True]
+
+    def avail_devices(self):
+        return [x for x in self.devices if x.available is True]
+
+    def offline_daemons(self):
+        return [x for x in self.daemons if x.running is not True]
 
     def namespace(self):
         return f"inventory/{self.hostname}"
@@ -59,8 +65,9 @@ class Host:
 
             Those are flat `key: value` pairs (i.e. Attribute, Config)
             """
-            component_collection = self.storable_components_map.get(component_name)
-            component_collection.from_json(component_data)
+            component_instance = STORABLE_COMPONENTS_MAP.get(component_name)
+            component_instance.from_json(component_data, self.mgr, self.hostname)
+            self.__setattr__(component_name, component_instance())
 
     def refresh_component(self):
         """

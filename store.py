@@ -33,7 +33,7 @@ class Store:
         // by giving each component their own namespace which allows us to update them
         // individually without having to re-write the entire inventory/host blob.
         """
-        assert data
+        assert data is not None
         print(f"Saving in namespace -> {self.namespace}")
         print(f"Saving data -> {data}")
         # TODO: bug, existing store data is not being loaded

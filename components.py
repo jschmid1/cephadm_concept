@@ -1,5 +1,6 @@
 from typing import *
 from store import Store
+# from host import STORABLE_COMPONENTS_MAP
 
 
 # TODO: Maybe s/Component/InventoryItem/g
@@ -15,22 +16,26 @@ class Component:
     loadable_fields = [] + loadable_base_fields
 
     def __init__(self, mgr=None, host=None, **kwargs):
-        print(f"Loading kwargs -> {kwargs}")
+        if not kwargs or not mgr or not host:
+            return
         self.mgr = mgr
         self.host = host
         self.version = None
         self.needs_refresh: bool = False
-        self.store = self.init_store()
+        print(f"Loading kwargs -> {kwargs}")
         for k, v in kwargs.items():
             if k not in self.loadable_fields:
                 print(f"field <{k}> is not supported in class <{self.__class__.__name__}>")
                 continue
             self.__setattr__(k, v, notify=False)
+        self.store = self.init_store()
+        print(f"Loading component {self} on host {host}")
 
     def init_store(self):
         """
         Load the dynamically namespaced `Store`
         """
+        assert self.host is not None
         return Store(self.mgr,
                      self.namespace(self.host),
                      version=self.version)
@@ -51,6 +56,8 @@ class Component:
 
     @classmethod
     def from_json(cls, data, mgr, host) -> 'Component':
+        if not data:
+            print('foo')
         print(f"Loading {cls} from json")
         return cls(mgr=mgr, host=host, **{
             key: data.get(key, None)
@@ -92,27 +99,7 @@ class Component:
 
     def __repr__(self):
         printable_fields = {k: v for (k, v) in self.__dict__.items() if k in self.loadable_fields}
-        return f"{self.component_name}({printable_fields})"
-
-
-class ComponentCollection:
-
-    def __init__(self, components: Optional[List[Component]]):
-        self.components = components
-        if not self.components:
-            self.components = []
-
-    def to_json(self):
-        return [c.to_json() for c in self.components]
-
-    def from_json(self):
-        return [c.from_json for c in self.components]
-
-    def __setattr__(self, key, value):
-        return [c.__setattr__(key, value) for c in self.components]
-
-    def __getattr__(self, item):
-        return [c.__getattribute__ for c in self.components]
+        return f"{self.__class__.__name__}({printable_fields})"
 
 
 class DaemonDescription(Component):
@@ -123,28 +110,12 @@ class DaemonDescription(Component):
         super(DaemonDescription, self).__init__(**kwargs)
 
 
-class DaemonDescriptions(ComponentCollection):
-    """
-    If a Component can have multiple entries, there needs to an interface to them
-    """
-    def __init__(self, components):
-        super(DaemonDescriptions, self).__init__(components)
-
-
 class Network(Component):
 
     loadable_fields = ['address', 'subnet'] + Component.loadable_base_fields
 
     def __init__(self, **kwargs):
         super(Network, self).__init__(**kwargs)
-
-
-class Networks(ComponentCollection):
-    """
-    If a Component can have multiple entries, there needs to an interface to them
-    """
-    def __init__(self, components):
-        super(Networks, self).__init__(components)
 
 
 class Attribute(Component):
@@ -163,14 +134,6 @@ class Device(Component):
         super(Device, self).__init__(**kwargs)
 
 
-class Devices(ComponentCollection):
-    """
-    If a Component can have multiple entries, there needs to an interface to them
-    """
-    def __init__(self, components):
-        super(Devices, self).__init__(components)
-
-
 class Config(Component):
 
     loadable_fields = ['foo', 'bar', 'baz'] + Component.loadable_base_fields
@@ -183,4 +146,70 @@ class Config(Component):
         Exception: Singularize (overwrite)
         """
         return f"inventory/{host}/{self.component_name}"
+
+
+class ComponentCollection:
+
+    base_component = None
+
+    def __init__(self, components: Optional[List[Component]] = None):
+        self.components = components
+        if not self.components:
+            self.components = []
+
+    def to_json(self) -> List[Dict[str, str]]:
+        return [c.to_json() for c in self.components]
+
+    @classmethod
+    def from_json(cls, data, mgr, host):
+        cls.components = [cls.base_component.from_json(c, mgr, host) for c in data]
+
+    def __setattr__(self, key, value):
+        return [c.__setattr__(key, value) for c in self.components]
+
+    def __getattr__(self, item):
+        return [c.__getattribute__ for c in self.components]
+
+    # TODO: implement iterator
+    def __iter__(self):
+        return self
+
+    def __next__(self):  # Python 2: def next(self)
+        return self.components
+
+    def __getitem__(self, item):
+        return self.components[item]
+
+
+class Devices(ComponentCollection):
+    """
+    If a Component can have multiple entries, there needs to an interface to them
+    """
+
+    base_component = Device
+
+    def __init__(self, components=None):
+        super(Devices, self).__init__(components)
+
+
+class Networks(ComponentCollection):
+    """
+    If a Component can have multiple entries, there needs to an interface to them
+    """
+
+    base_component = Network
+
+    def __init__(self, components=None):
+        super(Networks, self).__init__(components)
+
+
+class DaemonDescriptions(ComponentCollection):
+    """
+    If a Component can have multiple entries, there needs to an interface to them
+    """
+
+    base_component = DaemonDescription
+
+    def __init__(self, components=None):
+        super(DaemonDescriptions, self).__init__(components)
 
