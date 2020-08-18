@@ -1,5 +1,5 @@
 from store import Store
-from host import Host
+from host import Host, Hosts
 
 
 class Inventory:
@@ -13,7 +13,8 @@ class Inventory:
         self.requested_version = 2  # This can come from the module config
         self.loaded_version = None
         self.store = Store(mgr, 'inventory.', version=self.requested_version)
-        self.hosts = list()
+        # Instead of `List[Host]` add a `Hosts` to be uniform with Component(s)
+        self.hosts = Hosts()
         self.load_from_store()
 
     def load_from_store(self):
@@ -34,10 +35,4 @@ class Inventory:
                 self.hosts.append(host)
 
         assert self.loaded_version == self.requested_version
-
-    def add_host(self, host: Host):
-        pass
-
-    def remove_host(self, host: str):
-        pass
 

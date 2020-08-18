@@ -53,3 +53,17 @@ class Mgr:
         assert namespace
         pass
 
+    def run_cephadm(self, cmd):
+        return [
+            {
+                'daemon_id': 'mon.1',
+                'daemon_type': 'mon',
+                'container_image': 'sha1_test'
+            },
+            {
+                'daemon_id': 'mon.2',
+                'daemon_type': 'mon',
+                'container_image': 'sha1_test'
+            },
+        ]
+

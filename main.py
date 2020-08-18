@@ -24,13 +24,10 @@ class Internal:
         while True:
             print("foo")
             counter += 1
-            print(type(self.inventory.hosts[0].attributes))
-            print(type(self.inventory.hosts[0].networks))
-            self.inventory.hosts[0].devices[0].key1 = counter
-            self.inventory.hosts[0].networks[0].key1 = counter
-            self.inventory.hosts[0].attributes.key1 = counter
-            self.inventory.hosts[0].refresh_component()
-
+            for host in self.inventory.hosts:
+                for component in host.inventory_objects:
+                    print([x for x in component])
+                    # print(component.to_json())
             time.sleep(3)
             pass
 

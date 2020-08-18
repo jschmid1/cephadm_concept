@@ -66,8 +66,8 @@ class Host:
             Those are flat `key: value` pairs (i.e. Attribute, Config)
             """
             component_instance = STORABLE_COMPONENTS_MAP.get(component_name)
-            component_instance.from_json(component_data, self.mgr, self.hostname)
-            self.__setattr__(component_name, component_instance())
+            component_obj = component_instance.from_json(component_data, self.mgr, self.hostname)
+            self.__setattr__(component_name, component_obj)
 
     def refresh_component(self):
         """
@@ -93,3 +93,29 @@ class Host:
         printable_fields = {k: v for (k, v) in self.__dict__.items() if k in self.storable_components}
         return f"{self.__class__.__name__}({printable_fields})"
 
+
+class Hosts:
+
+    def __init__(self, hosts: List[Host] = None):
+        self.__hosts = hosts
+        if not hosts:
+            self.__hosts = []
+
+    def __iter__(self):
+        for host in self.__hosts:
+            yield host
+
+    def __getitem__(self, item):
+        return self.__hosts[item]
+
+    def append(self, host: Host):
+        for component in host.inventory_objects:
+            # If a host is getting added and there is no existing
+            # data in the mon_store, source it!
+            if component.needs_refresh:
+                inst = STORABLE_COMPONENTS_MAP.get(component.component_name)
+                inst.source(host.mgr, host.hostname)
+        self.__hosts.append(host)
+
+    def remove(self, host):
+        self.__hosts.remove(host)

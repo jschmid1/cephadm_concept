@@ -1,13 +1,14 @@
+# from __future__ import annotations
+import time
 from typing import *
 from store import Store
-# from host import STORABLE_COMPONENTS_MAP
 
 
 # TODO: Maybe s/Component/InventoryItem/g
 class Component:
 
     # Base fields that all components have in common
-    loadable_base_fields = ['key1']
+    loadable_base_fields = ['key1', 'last_update']
 
     # Loadable fields are supposed to hold attributes that are
     # good to be persisted to and loaded from the store.
@@ -21,7 +22,7 @@ class Component:
         self.mgr = mgr
         self.host = host
         self.version = None
-        self.needs_refresh: bool = False
+        self.last_update = None
         print(f"Loading kwargs -> {kwargs}")
         for k, v in kwargs.items():
             if k not in self.loadable_fields:
@@ -56,8 +57,6 @@ class Component:
 
     @classmethod
     def from_json(cls, data, mgr, host) -> 'Component':
-        if not data:
-            print('foo')
         print(f"Loading {cls} from json")
         return cls(mgr=mgr, host=host, **{
             key: data.get(key, None)
@@ -71,7 +70,7 @@ class Component:
 
     def __setattr__(self, key, value, notify=True):
         if (not hasattr(self, key) or getattr(self, key) != value) and key in self.loadable_fields:
-            if notify:
+            if notify and hasattr(self, 'store'):
                 self.notify_on_change()
         super(Component, self).__setattr__(key, value)
 
@@ -84,15 +83,39 @@ class Component:
         #    in rapid succession. Maybe only save if a threshold | time_past is reached.
         self.store.save(data=self.to_json())
 
-    def source(self):
+    @property
+    def needs_refresh(self):
+        """
+        Signalizes if the components needs a refresh (calling source()).
+        There are some factors that influence this.
+
+        * Time period has passed.
+          Daemons for example will be periodically checked.
+        * Adding new hosts
+        """
+        if self.last_update:
+            if time.time() - self.last_update > 3600:
+                return True
+        return False
+
+    @classmethod
+    def source(cls, mgr, host, data):
         """
         A custom method that describes how to source data (other than from the store)
         """
         pass
 
+    def __iter__(self):
+        """
+        Allow to iterate `Component` and only yield one item -> self.
+
+        This makes Component uniform with ComponentCollection
+        """
+        yield self
+
     def __eq__(self, other):
         return (self.__class__ == other.__class__ and
-                self.to_json() == other.to_json)
+                self.to_json() == other.to_json())
 
     def __hash__(self):
         return hash(self.to_json())
@@ -108,6 +131,20 @@ class DaemonDescription(Component):
 
     def __init__(self, **kwargs):
         super(DaemonDescription, self).__init__(**kwargs)
+
+    @classmethod
+    def source(cls, mgr, host, data: Dict[str, str]) -> 'DaemonDescription':
+        """
+        This is a dummy method that would contact the respective `self.host`
+        and retrieve the data for daemons.
+        """
+        dd = cls(mgr=mgr, host=host)
+        dd.last_update = time.time()
+        cls.daemon_id = data.get('daemon_id')
+        cls.daemon_type = data.get('daemon_type')
+        cls.container_image = data.get('container_image')
+        print(f"Sourced a {dd.component_name} -> from external data {dd}")
+        return dd
 
 
 class Network(Component):
@@ -149,36 +186,69 @@ class Config(Component):
 
 
 class ComponentCollection:
+    """
+    To have a common interface with `Component`. Now we can use
+
+     * to_json()
+     * from_json
+     * foo.bar = 'baz'
+     * baz = foo.bar
+     * [x for x in foo]
+     * x[0]
+
+     Just like with a non-list(flat) type Component.
+    """
 
     base_component = None
 
     def __init__(self, components: Optional[List[Component]] = None):
-        self.components = components
-        if not self.components:
-            self.components = []
+        # self.__components is 'private' (pseudo private)
+        self.__components = components
+        if not self.__components:
+            self.__components = []
 
     def to_json(self) -> List[Dict[str, str]]:
-        return [c.to_json() for c in self.components]
+        return [c.to_json() for c in self.__components]
 
     @classmethod
     def from_json(cls, data, mgr, host):
-        cls.components = [cls.base_component.from_json(c, mgr, host) for c in data]
+        cls.__components = [cls.base_component.from_json(c, mgr, host) for c in data]
+        return cls()
+
+    def save(self):
+        """
+        Forcefully save, this should however be handled via __setattr__ and notify()
+        """
+        return [c.save() for c in self.__components]
 
     def __setattr__(self, key, value):
-        return [c.__setattr__(key, value) for c in self.components]
+        return [c.__setattr__(key, value) for c in self.__components]
 
     def __getattr__(self, item):
-        return [c.__getattribute__ for c in self.components]
+        return [c.__getattribute__(item) for c in self.__components]
 
-    # TODO: implement iterator
+    @classmethod
+    def source(cls, mgr, hostname, data=None):
+        data: List[Dict[str, str]] = mgr.run_cephadm(f'cephadm run ceph-volume inventory on host {hostname}')
+        # This yields multiple entries for the hosts daemons detected by cephadm
+        components = list()
+        for daemon_data in data:
+            components.append(cls.base_component.source(mgr, hostname, daemon_data))
+        return cls(components)
+
+    @property
+    def component_name(self):
+        return self.__class__.__name__.lower()
+
+    def needs_refresh(self):
+        return any([c.needs_refresh for c in self.__components])
+
     def __iter__(self):
-        return self
-
-    def __next__(self):  # Python 2: def next(self)
-        return self.components
+        for component in self.__components:
+            yield component
 
     def __getitem__(self, item):
-        return self.components[item]
+        return self.__components[item]
 
 
 class Devices(ComponentCollection):
@@ -209,6 +279,11 @@ class DaemonDescriptions(ComponentCollection):
     """
 
     base_component = DaemonDescription
+
+    @property
+    def component_name(self):
+        """ Irregular naming """
+        return 'daemons'
 
     def __init__(self, components=None):
         super(DaemonDescriptions, self).__init__(components)
