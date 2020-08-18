@@ -16,6 +16,10 @@ class Inventory:
         # Instead of `List[Host]` add a `Hosts` to be uniform with Component(s)
         self.hosts = Hosts()
         self.load_from_store()
+        # self.load_from_source()
+
+    def add_host(self, host):
+        self.hosts.append(Host(hostname=host, mgr=self.mgr))
 
     def load_from_store(self):
         """
@@ -35,4 +39,17 @@ class Inventory:
                 self.hosts.append(host)
 
         assert self.loaded_version == self.requested_version
+
+    def load_from_source(self):
+        """
+        If any host is in the Inventory we attempt to refresh the data
+        of its components.
+
+        Conditions:
+        * if required (determined by component.needs_restart())
+        """
+        for host in self.hosts:
+            for component in host.inventory_blueprints:
+                component.source(host.mgr, host.hostname)
+
 

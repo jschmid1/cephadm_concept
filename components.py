@@ -23,6 +23,11 @@ class Component:
         self.host = host
         self.version = None
         self.last_update = None
+        # When the components get loaded from the mon_store
+        # we should trigger a refresh from the actual
+        # source of data (bin/cephadm i.e.). The mgr might
+        # have been down for a while and the data is now stale.
+        self._needs_refresh: bool = True
         print(f"Loading kwargs -> {kwargs}")
         for k, v in kwargs.items():
             if k not in self.loadable_fields:
@@ -93,25 +98,28 @@ class Component:
           Daemons for example will be periodically checked.
         * Adding new hosts
         """
+        if self._needs_refresh:
+            print(f"{self} needs refresh. _needs_refresh is True")
+            return True
+        if not self.last_update:
+            print(f"{self} needs refresh. last_update is not set")
+            return True
         if self.last_update:
-            if time.time() - self.last_update > 3600:
+            print(f"{self} needs refresh. Stale time has passed")
+            if time.time() - self.last_update > 5:
                 return True
         return False
 
     @classmethod
-    def source(cls, mgr, host, data):
+    def source(cls, mgr, host, data=None):
         """
         A custom method that describes how to source data (other than from the store)
         """
-        pass
-
-    def __iter__(self):
-        """
-        Allow to iterate `Component` and only yield one item -> self.
-
-        This makes Component uniform with ComponentCollection
-        """
-        yield self
+        print(f"source() is not implemented for {cls}")
+        obj = cls(mgr=mgr, host=host)
+        obj._needs_refresh = False
+        obj.last_update = time.time()
+        return obj
 
     def __eq__(self, other):
         return (self.__class__ == other.__class__ and
@@ -133,16 +141,17 @@ class DaemonDescription(Component):
         super(DaemonDescription, self).__init__(**kwargs)
 
     @classmethod
-    def source(cls, mgr, host, data: Dict[str, str]) -> 'DaemonDescription':
+    def source(cls, mgr, host, data: Dict[str, str] = None) -> 'DaemonDescription':
         """
-        This is a dummy method that would contact the respective `self.host`
-        and retrieve the data for daemons.
+        This is a dummy method to parse data from bin/cephadm and compose an DaemonDescription object.
         """
         dd = cls(mgr=mgr, host=host)
         dd.last_update = time.time()
         cls.daemon_id = data.get('daemon_id')
         cls.daemon_type = data.get('daemon_type')
         cls.container_image = data.get('container_image')
+        cls.last_refresh = time.time()
+        cls._needs_refresh = False
         print(f"Sourced a {dd.component_name} -> from external data {dd}")
         return dd
 
@@ -177,12 +186,6 @@ class Config(Component):
 
     def __init__(self, **kwargs):
         super(Config, self).__init__(**kwargs)
-
-    def namespace(self, host):
-        """
-        Exception: Singularize (overwrite)
-        """
-        return f"inventory/{host}/{self.component_name}"
 
 
 class ComponentCollection:
@@ -228,7 +231,7 @@ class ComponentCollection:
         return [c.__getattribute__(item) for c in self.__components]
 
     @classmethod
-    def source(cls, mgr, hostname, data=None):
+    def source(cls, mgr, hostname: str, data=None):
         data: List[Dict[str, str]] = mgr.run_cephadm(f'cephadm run ceph-volume inventory on host {hostname}')
         # This yields multiple entries for the hosts daemons detected by cephadm
         components = list()
@@ -271,6 +274,28 @@ class Networks(ComponentCollection):
 
     def __init__(self, components=None):
         super(Networks, self).__init__(components)
+
+
+class Attributes(ComponentCollection):
+    """
+    If a Component can have multiple entries, there needs to an interface to them
+    """
+
+    base_component = Attribute
+
+    def __init__(self, components=None):
+        super(Attributes, self).__init__(components)
+
+
+class Configs(ComponentCollection):
+    """
+    If a Component can have multiple entries, there needs to an interface to them
+    """
+
+    base_component = Config
+
+    def __init__(self, components=None):
+        super(Configs, self).__init__(components)
 
 
 class DaemonDescriptions(ComponentCollection):

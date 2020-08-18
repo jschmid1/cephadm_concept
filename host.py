@@ -1,10 +1,10 @@
 from typing import *
 from store import Store
-from components import Networks, Devices, Attribute, DaemonDescriptions, Config
+from components import Networks, Devices, Attributes, DaemonDescriptions, Configs
 
 STORABLE_COMPONENTS_MAP = {'networks': Networks,
-                           'attributes': Attribute,
-                           'config': Config,
+                           'attributes': Attributes,
+                           'configs': Configs,
                            'devices': Devices,
                            'daemons': DaemonDescriptions}
 
@@ -28,8 +28,8 @@ class Host:
         # statically initialize `storable_components`. This is just needed
         # to resolve and type-check attributes during development
         self.networks: Optional[Networks] = None
-        self.attributes: Optional[Attribute] = None
-        self.config: Optional[Config] = None
+        self.attributes: Optional[Attributes] = None
+        self.configs: Optional[Configs] = None
         self.devices: Optional[Devices] = None
         self.daemons: Optional[DaemonDescriptions] = None
         # end static init
@@ -48,7 +48,13 @@ class Host:
 
     @property
     def inventory_objects(self):
-        return [self.__getattribute__(component) for component in self.storable_components]
+        return filter(None, [self.__getattribute__(component)
+                             for component in self.storable_components])
+
+    @property
+    def inventory_blueprints(self):
+        return [STORABLE_COMPONENTS_MAP.get(component)
+                for component in self.storable_components]
 
     def populate_inventory(self, component):
         for component_name, component_data in component.items():
@@ -65,6 +71,8 @@ class Host:
 
             Those are flat `key: value` pairs (i.e. Attribute, Config)
             """
+            if component_name == 'config':
+                print('')
             component_instance = STORABLE_COMPONENTS_MAP.get(component_name)
             component_obj = component_instance.from_json(component_data, self.mgr, self.hostname)
             self.__setattr__(component_name, component_obj)
@@ -79,7 +87,7 @@ class Host:
         A refresh can be initiated for:
 
         * Devices:
-          Event from i.e. udev is detected, we should retrigger a device refresh.
+          Event from i.e. udev is detected, we should re-trigger a device refresh.
         * Networks:
           Event from kernel, udev
         * Daemons:
@@ -91,7 +99,7 @@ class Host:
 
     def __repr__(self):
         printable_fields = {k: v for (k, v) in self.__dict__.items() if k in self.storable_components}
-        return f"{self.__class__.__name__}({printable_fields})"
+        return f"<Host({self.hostname})> ({printable_fields})"
 
 
 class Hosts:
@@ -109,13 +117,18 @@ class Hosts:
         return self.__hosts[item]
 
     def append(self, host: Host):
-        for component in host.inventory_objects:
+        for component in host.inventory_blueprints:
             # If a host is getting added and there is no existing
             # data in the mon_store, source it!
-            if component.needs_refresh:
-                inst = STORABLE_COMPONENTS_MAP.get(component.component_name)
-                inst.source(host.mgr, host.hostname)
+            component_obj = component.source(host.mgr, host.hostname)
+            host.__setattr__(component_obj.component_name, component_obj)
         self.__hosts.append(host)
 
     def remove(self, host):
+        # TODO: Also remove it from the mon_store.
+        #       removing the object should call self.store.del
+        #       use __del__
         self.__hosts.remove(host)
+
+    def __repr__(self):
+        return f"<Hosts [{len(self.__hosts)}]>"

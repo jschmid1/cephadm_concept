@@ -22,13 +22,13 @@ inventory:
       # one node can have multiple Daemons running
       - key1: val
         key2: val
-    config: # config is a bad name, though
-      # host-level k-v pairs i.e. `last_host_check` could be a candidate
-      key1: val
-      key2: val
+    configs: # config is a bad name, though
+      # one node can have multiple Configs (Network, Performance, Apparmor, Container foo)
+      - key1: val
+        key2: val
     attributes:
       # here we store arbitrary information about the host like
       # fqdn, kernel version, os-name, labels etc
       # this opens up the possibility for node inspection (cpu/ram consumption etc)
-      key1: val
-      key2: val
+      - key1: val
+        key2: val

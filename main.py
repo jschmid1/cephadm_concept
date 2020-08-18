@@ -22,13 +22,19 @@ class Internal:
     def serve(self):
         counter = 0
         while True:
-            print("foo")
             counter += 1
             for host in self.inventory.hosts:
                 for component in host.inventory_objects:
-                    print([x for x in component])
+                    if component.needs_refresh():
+                        new_component = component.source(mgr=host.mgr, hostname=host.hostname)
+                    pass
+                    # print([x for x in component])
+                    # component.key1 = counter
                     # print(component.to_json())
-            time.sleep(3)
+            # print("Adding host <foo>")
+            # self.inventory.add_host('foo')
+            print(self.inventory.hosts)
+            time.sleep(2)
             pass
 
     def example_internal_method(self, blob: Any) -> Optional[Any]:
