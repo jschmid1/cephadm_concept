@@ -1,6 +1,6 @@
 from typing import *
 from store import Store
-from components import Networks, Devices, Attributes, DaemonDescriptions, Configs
+from components import Networks, Devices, Attributes, DaemonDescriptions, Configs, ComponentCollection
 
 STORABLE_COMPONENTS_MAP = {'networks': Networks,
                            'attributes': Attributes,
@@ -20,10 +20,8 @@ class Host:
     def __init__(self, hostname, mgr=None):
         self.mgr = mgr
         self.hostname = hostname
-        self.needs_refresh = False
+        self._needs_refresh = False
         self.requested_version = 2  # This can come from the module config
-        # TODO: hostnames can change. Account for that.
-        self.store = Store(mgr, self.namespace(), version=self.requested_version)
 
         # statically initialize `storable_components`. This is just needed
         # to resolve and type-check attributes during development
@@ -33,6 +31,8 @@ class Host:
         self.devices: Optional[Devices] = None
         self.daemons: Optional[DaemonDescriptions] = None
         # end static init
+
+        self.store = Store(self.mgr)
 
     def online_daemons(self):
         return [x for x in self.daemons if x.running is True]
@@ -56,26 +56,28 @@ class Host:
         return [STORABLE_COMPONENTS_MAP.get(component)
                 for component in self.storable_components]
 
-    def populate_inventory(self, component):
+    def populate_inventory_from_store(self, component):
         for component_name, component_data in component.items():
             print(f"Loading component -> {component_name}")
-            """
-            There are different types of components which can be identified by their
-            return type:
-
-            List:
-
-            These components consists of multiple entries (i.e. Devices, Daemons, Networks etc)
-
-            Dict:
-
-            Those are flat `key: value` pairs (i.e. Attribute, Config)
-            """
-            if component_name == 'config':
-                print('')
             component_instance = STORABLE_COMPONENTS_MAP.get(component_name)
-            component_obj = component_instance.from_json(component_data, self.mgr, self.hostname)
+            component_obj = component_instance.from_json(component_data, self.hostname)
             self.__setattr__(component_name, component_obj)
+
+    def save_to_store(self, component: ComponentCollection):
+        self.store.save(component.namespace(self.hostname), component.to_json())
+
+    def refresh(self):
+        for component in self.inventory_blueprints:
+            # If a host is getting added and there is no existing
+            # data in the mon_store, source it!
+            old_component = self.__getattribute__(component().component_name)
+            if old_component.needs_refresh():
+                data: List[Dict[str, str]] = self.mgr.run_cephadm(f'cephadm run ceph-volume inventory on host {host.hostname}')
+                component_obj = component.source(self.hostname, data=data)
+                self.__setattr__(component_obj.component_name, component_obj)
+                self.save_to_store(component_obj)
+            else:
+                print('No refresh required')
 
     def refresh_component(self):
         """
@@ -117,11 +119,7 @@ class Hosts:
         return self.__hosts[item]
 
     def append(self, host: Host):
-        for component in host.inventory_blueprints:
-            # If a host is getting added and there is no existing
-            # data in the mon_store, source it!
-            component_obj = component.source(host.mgr, host.hostname)
-            host.__setattr__(component_obj.component_name, component_obj)
+        host.refresh()
         self.__hosts.append(host)
 
     def remove(self, host):

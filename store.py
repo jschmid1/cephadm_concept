@@ -8,12 +8,12 @@ class Store:
           CRUD could be helpful here
     """
 
-    def __init__(self, mgr, namespace, version=2):
+    def __init__(self, mgr, namespace=None, version=2):
         self.mgr = mgr
         self.namespace = namespace
         self.version = version
 
-    def save(self, data=None) -> bool:
+    def save(self, namespace=None, data=None) -> bool:
         """
         Save `blob` to store.
 
@@ -33,16 +33,11 @@ class Store:
         // by giving each component their own namespace which allows us to update them
         // individually without having to re-write the entire inventory/host blob.
         """
-        assert data is not None
-        print(f"Saving in namespace -> {self.namespace}")
+        assert data
+        assert namespace
+        print(f"Saving in namespace -> {namespace}")
         print(f"Saving data -> {data}")
-        # TODO: bug, existing store data is not being loaded
-        old = self.mgr.get_store_prefix(self.namespace, version=self.version)
-        if self.has_changes(data, old):
-            print("Changes detected. Writing to store")
-            return self.mgr.set_store(self.namespace, self.jsonify(data), version=self.version)
-        print("No changes. Not writing to the store")
-        return True
+        return self.mgr.set_store(namespace, self.jsonify(data), version=self.version)
 
     @staticmethod
     def jsonify(data) -> Optional[str]:
@@ -63,13 +58,13 @@ class Store:
         print(f"new -> {new}")
         return new != old
 
-    def load(self) -> Generator[str, Dict[Any, Any], Any]:
+    def load(self, namespace) -> Generator[str, Dict[Any, Any], Any]:
         """
         Load from the mon_store.
 
         This should only happen on object creation (ceph-mgr startup).
         """
-        for k, v in self.mgr.get_store_prefix(self.namespace, version=self.version).items():
+        for k, v in self.mgr.get_store_prefix(namespace, version=self.version).items():
             yield k, v
 
     def migrate(self, from_v, to_v):

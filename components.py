@@ -16,10 +16,9 @@ class Component:
     # data that could lead to issues if getting stale.
     loadable_fields = [] + loadable_base_fields
 
-    def __init__(self, mgr=None, host=None, **kwargs):
-        if not kwargs or not mgr or not host:
+    def __init__(self,host=None, **kwargs):
+        if not kwargs or not host:
             return
-        self.mgr = mgr
         self.host = host
         self.version = None
         self.last_update = None
@@ -27,46 +26,26 @@ class Component:
         # we should trigger a refresh from the actual
         # source of data (bin/cephadm i.e.). The mgr might
         # have been down for a while and the data is now stale.
-        self._needs_refresh: bool = True
+        self._needs_refresh: bool = False
         print(f"Loading kwargs -> {kwargs}")
         for k, v in kwargs.items():
             if k not in self.loadable_fields:
                 print(f"field <{k}> is not supported in class <{self.__class__.__name__}>")
                 continue
             self.__setattr__(k, v, notify=False)
-        self.store = self.init_store()
         print(f"Loading component {self} on host {host}")
 
-    def init_store(self):
-        """
-        Load the dynamically namespaced `Store`
-        """
-        assert self.host is not None
-        return Store(self.mgr,
-                     self.namespace(self.host),
-                     version=self.version)
+    @classmethod
+    def from_json(cls, data, host) -> 'Component':
+        print(f"Loading {cls} from json")
+        return cls(host=host, **{
+            key: data.get(key, None)
+            for key in cls.loadable_fields
+        })
 
     @property
     def component_name(self):
         return self.__class__.__name__.lower()
-
-    def namespace(self, host):
-        """
-        Components have a dynamic namespace based on the hostname and the
-        `component_name`.
-
-        TODO: Find a rule for pluralization/singularization
-              Currently we're overwriting methods if it's NOT pluralizable
-        """
-        return f"inventory/{host}/{self.component_name}s"
-
-    @classmethod
-    def from_json(cls, data, mgr, host) -> 'Component':
-        print(f"Loading {cls} from json")
-        return cls(mgr=mgr, host=host, **{
-            key: data.get(key, None)
-            for key in cls.loadable_fields
-        })
 
     def to_json(self) -> dict:
         # to_json all fields that are in loadable_fields and are not None (reduces the clutter)
@@ -81,12 +60,6 @@ class Component:
 
     def notify_on_change(self):
         print("A loadable_field was changed. This triggers a save() operation")
-        self.save()
-
-    def save(self):
-        # Q: We potentially queue up a lot of save() operations when attributes are changed
-        #    in rapid succession. Maybe only save if a threshold | time_past is reached.
-        self.store.save(data=self.to_json())
 
     @property
     def needs_refresh(self):
@@ -98,28 +71,30 @@ class Component:
           Daemons for example will be periodically checked.
         * Adding new hosts
         """
-        if self._needs_refresh:
-            print(f"{self} needs refresh. _needs_refresh is True")
+        if self._needs_refresh is True:
+            print(f"{self.component_name} needs refresh. _needs_refresh is True")
             return True
         if not self.last_update:
-            print(f"{self} needs refresh. last_update is not set")
+            print(f"{self.component_name} needs refresh. last_update is not set")
             return True
         if self.last_update:
-            print(f"{self} needs refresh. Stale time has passed")
-            if time.time() - self.last_update > 5:
+            if time.time() - self.last_update > 1:
+                print(f"{self.component_name} needs refresh. Stale time has passed")
                 return True
         return False
 
     @classmethod
-    def source(cls, mgr, host, data=None):
+    def source(cls, host, data=None):
         """
         A custom method that describes how to source data (other than from the store)
         """
         print(f"source() is not implemented for {cls}")
-        obj = cls(mgr=mgr, host=host)
+        # Mocking this function for development. Remove later
+        obj = cls(host=host)
         obj._needs_refresh = False
         obj.last_update = time.time()
         return obj
+        # Mocking this function for development. Remove later
 
     def __eq__(self, other):
         return (self.__class__ == other.__class__ and
@@ -140,18 +115,27 @@ class DaemonDescription(Component):
     def __init__(self, **kwargs):
         super(DaemonDescription, self).__init__(**kwargs)
 
+    @property
+    def component_name(self):
+        """ Irregular naming """
+        return 'daemon'
+
     @classmethod
-    def source(cls, mgr, host, data: Dict[str, str] = None) -> 'DaemonDescription':
+    def source(cls, host, data: Dict[str, str] = None) -> 'DaemonDescription':
         """
         This is a dummy method to parse data from bin/cephadm and compose an DaemonDescription object.
         """
-        dd = cls(mgr=mgr, host=host)
+        dd = cls(host=host)
         dd.last_update = time.time()
-        cls.daemon_id = data.get('daemon_id')
-        cls.daemon_type = data.get('daemon_type')
-        cls.container_image = data.get('container_image')
-        cls.last_refresh = time.time()
-        cls._needs_refresh = False
+        # This should've happened in __init__ while cls(host)
+        # TODO: Find out why not?
+        dd.host = host
+        dd.version = '1'
+        dd.daemon_id = data.get('daemon_id')
+        dd.daemon_type = data.get('daemon_type')
+        dd.container_image = data.get('container_image')
+        dd.last_refresh = time.time()
+        dd._needs_refresh = False
         print(f"Sourced a {dd.component_name} -> from external data {dd}")
         return dd
 
@@ -205,43 +189,61 @@ class ComponentCollection:
     base_component = None
 
     def __init__(self, components: Optional[List[Component]] = None):
-        # self.__components is 'private' (pseudo private)
+        if not components:
+            components = []
         self.__components = components
-        if not self.__components:
-            self.__components = []
+
+    @property
+    def component_name(self):
+        return self.__class__.__name__.lower()
+
+    def namespace(self, host):
+        """
+        Components have a dynamic namespace based on the hostname and the
+        `component_name`.
+
+        TODO: Find a rule for pluralization/singularization
+              Currently we're overwriting methods if it's NOT pluralizable
+        """
+        return f"inventory/{host}/{self.component_name}s"
 
     def to_json(self) -> List[Dict[str, str]]:
         return [c.to_json() for c in self.__components]
 
     @classmethod
-    def from_json(cls, data, mgr, host):
-        cls.__components = [cls.base_component.from_json(c, mgr, host) for c in data]
+    def from_json(cls, data, host):
+        cls.__components = [cls.base_component.from_json(c, host) for c in data]
         return cls()
 
     def save(self):
         """
         Forcefully save, this should however be handled via __setattr__ and notify()
         """
-        return [c.save() for c in self.__components]
+        blob = [c.to_json() for c in self.__components]
+        return blob
+        # TODO: save to_store
+        # Use a Singleton instance of Store, this avoids write conflicts
 
-    def __setattr__(self, key, value):
-        return [c.__setattr__(key, value) for c in self.__components]
-
-    def __getattr__(self, item):
-        return [c.__getattribute__(item) for c in self.__components]
+    # TODO: Temp disable, not working properly
+    # def __setattr__(self, key, value):
+    #     if key == '__components':
+    #         self.__components = value
+    #     return [c.__setattr__(key, value) for c in self.__components]
+    #
+    # def __getattr__(self, item):
+    #     if item == '__components':
+    #         return self.__components
+    #     return [c.__getattribute__(item) for c in self.__components]
 
     @classmethod
-    def source(cls, mgr, hostname: str, data=None):
-        data: List[Dict[str, str]] = mgr.run_cephadm(f'cephadm run ceph-volume inventory on host {hostname}')
-        # This yields multiple entries for the hosts daemons detected by cephadm
+    def source(cls, hostname: str, data=None):
+        if not data:
+            data = []
         components = list()
+        assert hostname is not None
         for daemon_data in data:
-            components.append(cls.base_component.source(mgr, hostname, daemon_data))
+            components.append(cls.base_component.source(hostname, daemon_data))
         return cls(components)
-
-    @property
-    def component_name(self):
-        return self.__class__.__name__.lower()
 
     def needs_refresh(self):
         return any([c.needs_refresh for c in self.__components])
@@ -305,11 +307,19 @@ class DaemonDescriptions(ComponentCollection):
 
     base_component = DaemonDescription
 
+    def __init__(self, components=None):
+        super(DaemonDescriptions, self).__init__(components)
+
     @property
     def component_name(self):
         """ Irregular naming """
         return 'daemons'
 
-    def __init__(self, components=None):
-        super(DaemonDescriptions, self).__init__(components)
-
+    @classmethod
+    def source(cls, hostname: str, data=None):
+        # TODO: maybe even run this somewhere else and just pass the data
+        # This yields multiple entries for the hosts daemons detected by cephadm
+        components = list()
+        for daemon_data in data:
+            components.append(cls.base_component.source(hostname, daemon_data))
+        return cls(components=components)

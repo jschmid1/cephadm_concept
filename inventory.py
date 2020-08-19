@@ -12,14 +12,17 @@ class Inventory:
         self.ident = None
         self.requested_version = 2  # This can come from the module config
         self.loaded_version = None
-        self.store = Store(mgr, 'inventory.', version=self.requested_version)
+        self.store = Store(mgr, version=self.requested_version)
         # Instead of `List[Host]` add a `Hosts` to be uniform with Component(s)
         self.hosts = Hosts()
         self.load_from_store()
-        # self.load_from_source()
+        self.load_from_source()
 
-    def add_host(self, host):
-        self.hosts.append(Host(hostname=host, mgr=self.mgr))
+    def add_host(self, host: Host):
+        self.hosts.append(host)
+
+    def remove_host(self, host):
+        self.hosts.remove(host)
 
     def load_from_store(self):
         """
@@ -29,13 +32,13 @@ class Inventory:
 
         This method contains custom logic for populating attributes.
         """
-        for ident, data in self.store.load():
+        for ident, data in self.store.load('inventory.'):
             self.ident = ident
             self.loaded_version = data.pop('version')
             for host, component in data.items():
                 print(f"Loading components for host <{host}>")
                 host = Host(hostname=host, mgr=self.mgr)
-                host.populate_inventory(component)
+                host.populate_inventory_from_store(component)
                 self.hosts.append(host)
 
         assert self.loaded_version == self.requested_version
@@ -49,7 +52,9 @@ class Inventory:
         * if required (determined by component.needs_restart())
         """
         for host in self.hosts:
-            for component in host.inventory_blueprints:
-                component.source(host.mgr, host.hostname)
+            host.refresh()
 
+    def refresh(self):
+        print(f"Triggering checks for refresh")
+        self.load_from_source()
 
